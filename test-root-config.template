@@ -1,0 +1,45 @@
+# There is just one section [confs]
+[confs]
+
+# Directory to build the new root into
+#   This option is required
+#   If this does not start with a "/", it is relative to the program root
+#directory = /path/to/dir
+
+# Suffix for the root name servers
+#   Defaults to "some-servers.p53"
+#   The name server suffix must have exactly two labels (a.b)
+#suffix = something.notreal
+
+# The IPv4 and IPv6 addresses that the new root should respond to
+#   At least one of "ipv4" and/or "ipv6" must be given
+#   If either "ipv4" or "ipv6" are not given, that protocol will not be supported
+#   Multiple values are separated with spaces
+#   Do *not* include either IPv4 or IPv6 loopback addresses here
+#ipv4 = 1.2.3.4 5.6.7.8
+#ipv6 = 2600:dead::beef 2600:face::feed
+
+# Type of key for the KSK
+#   Must be rsa2048 or rsa4096 (more options will be added later)
+#   Defaults to rsa2048
+#ksk-type = rsa2048
+
+# Number of KSK keys
+#   Defaults to 1
+#ksk-number = 1
+
+# Type of key for the ZSK
+#   Must be rsa2048 or rsa4096 (more options will be added later)
+#   Defaults to rsa2048
+#zsk-type = rsa2048
+
+# Number of ZSK keys
+#   Defaults to 1
+#zsk-number = 1
+
+# Emit the wrong trust anchor
+#   This is probably only useful for testing key rollovers where
+#   someone is still using the old KSK as a trust anchor
+#   This is only allowed if ksk-number is greater than 1
+#   Defaults to false
+# wrong-trust-anchor = false
