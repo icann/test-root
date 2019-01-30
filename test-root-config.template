@@ -43,3 +43,8 @@
 #   This is only allowed if ksk-number is greater than 1
 #   Defaults to false
 # wrong-trust-anchor = false
+
+# Prefix for the dnssec-* binaries from BIND
+#   Default is "/usr/sbin"
+# bin-prefix = /usr/local/sbin
+
