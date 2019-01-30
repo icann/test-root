@@ -276,18 +276,19 @@ if __name__ == "__main__":
 	# Add the DS record for nameserver TLD
 	root_zone_lines.append(namenameserver_tld_ds_record.strip())
 	# Create address records for the name servers
-	#   Only the first two IPv4 or IPv6 addresses are used
+	#   Need enough addresses for the 13 name servers.
+	#   If the list of addresses is shorter than 13, keep repeating it until it is 13 or longer, then shorten to 13
 	nameserver_address_records = []
 	if v4_addrs:
-		if len(v4_addrs) > 0:
-			nameserver_address_records.extend(["{} 3600 IN A {}".format(x, v4_addrs[0]) for x in all_server_full_names])
-		if len(v4_addrs) > 1:
-			nameserver_address_records.extend(["{} 3600 IN A {}".format(x, v4_addrs[1]) for x in all_server_full_names])
+		while len(v4_addrs) < 13:
+			v4_addrs.extend(v4_addrs)
+		v4_addrs = v4_addrs[:13]
+		nameserver_address_records.extend(["{} 3600 IN A {}".format(all_server_full_names[x], v4_addrs[x]) for x in range(len(all_server_full_names))])
 	if v6_addrs:
-		if len(v6_addrs) > 0:
-			nameserver_address_records.extend(["{} 3600 IN AAAA {}".format(x, v6_addrs[0]) for x in all_server_full_names])
-		if len(v6_addrs) > 1:
-			nameserver_address_records.extend(["{} 3600 IN AAAA {}".format(x, v6_addrs[1]) for x in all_server_full_names])
+		while len(v6_addrs) < 13:
+			v6_addrs.extend(v6_addrs)
+		v6_addrs = v6_addrs[:13]
+		nameserver_address_records.extend(["{} 3600 IN AAAA {}".format(all_server_full_names[x], v6_addrs[x]) for x in range(len(all_server_full_names))])
 	root_zone_lines.extend(nameserver_address_records)
 	# Put it all together
 	root_zone_content = "\n".join(root_zone_lines) + "\n"
