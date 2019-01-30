@@ -46,8 +46,6 @@ See the `LICENSE` file.
 
 ## Future features
 
-* The root zone is now always signed with one ZSK; this could be more flexible.
-
 * Add algorithims other than RSA.
 
 * The zone that is used for the root server naming should be signed like .net is signed.
