@@ -37,14 +37,15 @@
 #   someone is still using the old KSK as a trust anchor
 #   This is only allowed if ksk-number is greater than 1
 #   Defaults to false
-# wrong-trust-anchor = false
+#wrong-trust-anchor = false
 
 ### The following two settings relate to the local environment on the system running this program
 
 # Directory to build the new root into
 #   This option is required
-#   If this does not start with a "/", it is relative to the program root
+#   If this does not start with a "/", it is relative to where the configuration file lives
 #directory = /path/to/dir
+#directory = subdir  # Will be created as a diretory under the one where this config file is
 
 # Prefix for the dnssec-* binaries from BIND
 #   Default is "/usr/sbin"
