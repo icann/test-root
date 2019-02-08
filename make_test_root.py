@@ -12,9 +12,20 @@ ROOT_HINTS_FILE_NAME = "root.hints"
 BIND_TRUSTED_KEYS_NAME = "bind-trusted-keys"
 PDNS_TRUSTED_KEYS_NAME = "pdns-lua"
 KNOT_CONFIG_FILE_NAME = "knot-config"
-ALLOWED_SIGNATURE_TYPES = ("rsa2048", "rsa4096")
 DEFAULT_NAMESERVER_NAME_SUFFIX = "some-servers.p53"
 DEFAULT_BIN_PREFIX = "/usr/sbin"
+
+ALLOWED_SIGNATURE_TYPES = {
+	"rsa2048": "-a RSASHA256 -b 2048",
+	"rsa4096": "-a RSASHA256 -b 4096",
+	"rsa2048sha512": "-a RSASHA512 -b 2048",
+	"rsa4096sha512": "-a RSASHA512 -b 4096",
+	"gost": "-a ECCGOST",
+	"ecdsa256": "-a ECDSAP256SHA256",
+	"ecdsa384": "-a ECDSAP384SHA384",
+	"eddsa": "-a ED25519",
+	"ed448": "-a ED448"
+}
 
 # Boring functions
 def log(log_message):
@@ -34,15 +45,9 @@ def die(in_str):
 
 def get_crypto(in_type):
 	''' Returns the BIND string for the algorithm and length from a type '''
-	##FUTURE## Clearly more needs to go here when additional algorithms are added #####
 	if in_type not in ALLOWED_SIGNATURE_TYPES:
-		die("Unknown signature type '{}' was given.".format(in_type))
-	if in_type == "rsa2048":
-		return "-a RSASHA256 -b 2048"
-	elif in_type == "rsa4096":
-		return "-a RSASHA256 -b 4096"
-	else:
-		die("Was unable to parse crypto parameter '{}' for algorithm.".format(in_type))
+		die("Unknown signature type '{}' was given. Choose from {}.".format(in_type, " ".join(ALLOWED_SIGNATURE_TYPES.keys())))
+	return ALLOWED_SIGNATURE_TYPES[in_type]
 
 if __name__ == "__main__":
 	''' Main program '''
@@ -55,12 +60,6 @@ if __name__ == "__main__":
 	config_file = sys.argv[1]
 	if not os.path.exists(config_file):
 		die("Could not find the configuration file '{}'.".format(config_file))
-
-	# Sanity check that bindutils are installed
-	try:
-		subprocess.check_call("which named-checkconf", shell=True)
-	except Exception as this_e:
-		die("Could not find named-checkconf, so BIND utilities are probably not installed in your path. See the README. '{}'".format(this_e))
 
 	# Get the cotents of the config file
 	log("Config file is {}".format(config_file))
@@ -84,6 +83,13 @@ if __name__ == "__main__":
 		die("Cannot reliably create output directories with spaces in their names.")
 	if not (config.get("ipv4") or config.get("ipv6")):
 		die("One or both of 'ipv4' and/or 'ipv6' must be given in the config file.")
+
+	# Get the prefix for the binaries
+	binary_prefix = config.get("bin-prefix", DEFAULT_BIN_PREFIX)
+
+	# Sanity check that bindutils are installed
+	if not os.path.exists("{}/named-checkconf".format(binary_prefix)):
+		die("Could not find named-checkconf in {}. See the README.".format(binary_prefix))
 
 	# Get the nameserver name and parts
 	nameserver_suffix = config.get("suffix", DEFAULT_NAMESERVER_NAME_SUFFIX)
@@ -142,54 +148,38 @@ if __name__ == "__main__":
 	for this_letter in "abcdefghijklm":
 		all_server_full_names.append("{}.{}.".format(this_letter, nameserver_suffix))
 
-	# Get the prefix for the binaries
-	binary_prefix = config.get("bin-prefix", DEFAULT_BIN_PREFIX)
-
 	### Create new KSK and ZSK keys
 	ksk_type = config.get("ksk-type", "rsa2048")
-	if ksk_type == "rsa1024":
-		ksk_crypto_args = "-a rsasha256 -b 1024"
-	elif ksk_type == "rsa2048":
-		ksk_crypto_args = "-a rsasha256 -b 2048"
-	else:
-		die("Only rsa1024 and rsa2048 are allowed for algorithm types.")
-	key_file_names = []  # All the key files
-	ksk_file_names = []  # Just the KSKs
-	zsk_file_names = []  # Just the ZSKs
+	ksk_crypto_args = get_crypto(ksk_type)
 	number_of_ksks = config.get("ksk-number", "1")  # Comes in as a string
 	number_of_ksks = int(number_of_ksks)
-	# If wrong-trust-anchor is set, ksk-number must be greater than 1
-	use_wrong_trust_anchor = config.get("wrong-trust-anchor")
-	if use_wrong_trust_anchor and (number_of_ksks <= 1):
-		die("Setting wrong-trust-anchor requires ksk-number to be greater than 1.")
-	for _ in range(number_of_ksks):
-		try:
-			this_output = subprocess.getoutput("{}/dnssec-keygen -f KSK {} -n ZONE -L 172800 -r /dev/urandom .".format(binary_prefix, ksk_crypto_args))
-			key_file_names.append((this_output.splitlines())[-1])
-			ksk_file_names.append((this_output.splitlines())[-1])
-		except Exception as this_e:
-			die("Was not able to create KSK keys: '{}'.".format(this_e))
 	zsk_type = config.get("zsk-type", "rsa2048")
 	zsk_crypto_args = get_crypto(zsk_type)
 	number_of_zsks = config.get("zsk-number", "1")  # Comes in as a string
 	number_of_zsks = int(number_of_zsks)
+	# Save the file names as the key files are produced
+	ksk_file_names = []  # Just the KSKs
+	zsk_file_names = []  # Just the ZSKs
+	# Make the KSK and ZSK files
+	for _ in range(number_of_ksks):
+		this_output = subprocess.getoutput("{}/dnssec-keygen -f KSK {} -n ZONE -L 172800 -r /dev/urandom .".format(binary_prefix, ksk_crypto_args))
+		first_line_of_output = (this_output.splitlines())[-1]
+		if "fatal" in first_line_of_output:
+			die("Failed to make the KSK keys: {}".format(first_line_of_output))
+		ksk_file_names.append(first_line_of_output)
 	for _ in range(number_of_zsks):
-		try:
-			this_output = subprocess.getoutput("{}/dnssec-keygen {} -n ZONE -L 172800 -r /dev/urandom .".format(binary_prefix, zsk_crypto_args))
-			key_file_names.append((this_output.splitlines())[-1])
-			zsk_file_names.append((this_output.splitlines())[-1])
-		except Exception as this_e:
-			die("Was not able to create ZSK keys: '{}'.".format(this_e))
-	log("The key file names are {}".format(key_file_names))
-	# Name the first ZSK for signing the zone
-	#   ##FUTURE## This is a special case that should be fixed later #####
-	first_zsk_file_name = zsk_file_names[0]
-	# Make the first KSK the one to be signing
-	ksk_for_signing_file = ksk_file_names[0]
-	log_and_print("The signing KSK file is {}".format(ksk_for_signing_file))
-	if len(ksk_file_names) > 1:
-		log_and_print("The additional KSK files are {}".format(", ".join(ksk_file_names[1:])))
-	log_and_print("The ZSK files are {}".format(", ".join(zsk_file_names)))
+		this_output = subprocess.getoutput("{}/dnssec-keygen  {} -n ZONE -L 172800 -r /dev/urandom .".format(binary_prefix, zsk_crypto_args))
+		first_line_of_output = (this_output.splitlines())[-1]
+		if "fatal" in first_line_of_output:
+			die("Failed to make the ZSK keys: {}".format(first_line_of_output))
+		zsk_file_names.append(first_line_of_output)
+	log_and_print("The {} KSKs are {}".format(len(ksk_file_names), " ".join(ksk_file_names)))
+	log_and_print("The {} ZSKs are {}".format(len(zsk_file_names), " ".join(zsk_file_names)))
+	# If wrong-trust-anchor is set, ksk-number must be greater than 1
+	use_wrong_trust_anchor = config.get("wrong-trust-anchor")
+	if use_wrong_trust_anchor and (number_of_ksks <= 1):
+		die("Setting wrong-trust-anchor requires ksk-number to be greater than 1.")
+	
 	# Pick which KSK to use as the trust anchor
 	#   If use_wrong_trust_anchor, use the second one instead of the first
 	if use_wrong_trust_anchor:
@@ -202,11 +192,10 @@ if __name__ == "__main__":
 			ksk_for_trust_anchor = this_line.strip()
 			break
 	log("The trust anchor value is {}".format(ksk_for_trust_anchor))
-	try:
-		subprocess.check_call("{}/dnssec-dsfromkey -2 {}.key >{}"
-			.format(binary_prefix, ksk_for_trust_anchor_file, TRUST_ANCHOR_DS_FILE_NAME), shell=True)
-	except Exception as this_e:
-		die("Could not run dnssec-dsfromkey on '{}': '{}'.".format(ksk_for_trust_anchor_file, this_e))
+	this_return_text = subprocess.getoutput("{}/dnssec-dsfromkey -2 {}.key >{}"
+			.format(binary_prefix, ksk_for_trust_anchor_file, TRUST_ANCHOR_DS_FILE_NAME))
+	if "fatal" in this_return_text:
+		die("Could not run dnssec-dsfromkey on '{}': '{}'.".format(ksk_for_trust_anchor_file, this_return_text))
 	trust_anchor_dnskey_f = open(TRUST_ANCHOR_DNSKEY_FILE_NAME, mode="wt")
 	trust_anchor_dnskey_f.write("{}\n".format(ksk_for_trust_anchor))
 	trust_anchor_dnskey_f.close()
@@ -219,11 +208,11 @@ if __name__ == "__main__":
 	#   We need to do this part now so that we can add the DS record of the KSK to the root zone if we are signing the new TLD
 	log("Making KSK for {}".format(nameserver_name_suffix_tld))
 	# As a shortcut, use the same signing type as the KSK
-	try:
-		this_output = subprocess.getoutput("{}/dnssec-keygen {} -f KSK -n ZONE -L 3600 -r /dev/urandom {}.".format(binary_prefix, ksk_crypto_args, nameserver_name_suffix_tld))
-		nameserver_tld_ksk_file_name = (this_output.splitlines())[-1]
-	except Exception as this_e:
-		die("Was not able to create nameserver KSK: '{}'.".format(this_e))
+	this_return_text = subprocess.getoutput("{}/dnssec-keygen {} -f KSK -n ZONE -L 3600 -r /dev/urandom {}."\
+		.format(binary_prefix, ksk_crypto_args, nameserver_name_suffix_tld))
+	if "fatal" in this_return_text:
+		die("Was not able to create nameserver KSK: '{}'.".format(this_return_text))
+	nameserver_tld_ksk_file_name = (this_return_text.splitlines())[-1]
 	# Get the DNSKEY of this new key, for inclusion in the root zone
 	for this_line in open("{}.key".format(nameserver_tld_ksk_file_name), mode="rt"):
 		if this_line.startswith("{}.".format(nameserver_name_suffix_tld)):
@@ -231,18 +220,16 @@ if __name__ == "__main__":
 			break
 	log("The KSK for {} is {}".format(nameserver_name_suffix_tld, nameserver_signing_key_value))
 	nameserver_ds_file = "{}.ds".format(nameserver_tld_ksk_file_name)
-	try:
-		subprocess.check_call("{}/dnssec-dsfromkey -2 {}.key >{}".format(binary_prefix, nameserver_tld_ksk_file_name, nameserver_ds_file), shell=True)
-	except Exception as this_e:
-		die("Could not run dnssec-dsfromkey on '{}': '{}'.".format(nameserver_tld_ksk_file_name, this_e))
+	this_return_text = subprocess.getoutput("{}/dnssec-dsfromkey -2 {}.key >{}".format(binary_prefix, nameserver_tld_ksk_file_name, nameserver_ds_file))
+	if "fatal" in this_return_text:
+		die("Could not run dnssec-dsfromkey on '{}': '{}'.".format(nameserver_tld_ksk_file_name, this_return_text))
 	namenameserver_tld_ds_record = open(nameserver_ds_file, mode="rt").read()
 	log("Making ZSK for {}".format(nameserver_name_suffix_tld))
 	# As a shortcut, use the same signing type as the KSK
-	try:
-		this_output = subprocess.getoutput("{}/dnssec-keygen {} -n ZONE -L 3600 -r /dev/urandom {}.".format(binary_prefix, ksk_crypto_args, nameserver_name_suffix_tld))
-		nameserver_tld_zsk_file_name = (this_output.splitlines())[-1]
-	except Exception as this_e:
-		die("Was not able to create nameserver ZSK: '{}'.".format(this_e))
+	this_return_text = subprocess.getoutput("{}/dnssec-keygen {} -n ZONE -L 3600 -r /dev/urandom {}.".format(binary_prefix, ksk_crypto_args, nameserver_name_suffix_tld))
+	if "fatal" in this_return_text:
+		die("Was not able to create nameserver ZSK: '{}'.".format(this_return_text))
+	nameserver_tld_zsk_file_name = (this_return_text.splitlines())[-1]
 
 	### Make a new root zone file
 	# Get the contents into a string so we can fix them
@@ -263,7 +250,7 @@ if __name__ == "__main__":
 	root_zone_lines = [x for x in root_zone_lines if (x.split(" "))[3] != "RRSIG"]
 	root_zone_lines = [x for x in root_zone_lines if (x.split(" "))[3] != "NSEC"]
 	# Add the new DNSKEY records
-	for this_file in key_file_names:
+	for this_file in (ksk_file_names + zsk_file_names):
 		in_lines = open(this_file + ".key", mode="rt").readlines()
 		root_zone_lines.append((in_lines[-1]).strip())
 	# Remove the original NS records for the root
@@ -296,23 +283,21 @@ if __name__ == "__main__":
 	root_f.write(root_zone_content)
 	root_f.close()
 	# Sanity check the resulting zone
-	try:
-		subprocess.check_call("named-checkzone -q -i local . {} >/dev/null".format(UNSIGNED_FILE_NAME), shell=True)
-	except Exception as this_e:
-		die("Sanity-checking the unsigned root zone before signing died with '{}'.".format(this_e))
+	this_return_text = subprocess.getoutput("named-checkzone -q -i local . {} >/dev/null".format(UNSIGNED_FILE_NAME))
+	if "fatal" in this_return_text:
+		die("Sanity-checking the unsigned root zone before signing died with '{}'.".format(this_return_text))
 
 	### Sign the root zone
-	try:
-		##FUTURE## The last argument (the ZSK) should change if there are multiple ZSKs #####
-		subprocess.check_call("{0}/dnssec-signzone -x -o . -f root.zone {1} {2} {3} >/dev/null 2>/dev/null"
-			.format(binary_prefix, UNSIGNED_FILE_NAME, ksk_for_signing_file, first_zsk_file_name), shell=True)
-	except Exception as this_e:
-		die("Signing the . zone failed with '{}'.".format(this_e))
+	root_signing_cmd = "{0}/dnssec-signzone -e 20300101000000 -o . -f root.zone {1} {2} >/dev/null"\
+		.format(binary_prefix, UNSIGNED_FILE_NAME, " ".join(ksk_file_names + zsk_file_names))
+	this_return_text = subprocess.getoutput(root_signing_cmd)
+	if "fatal" in this_return_text:
+		die("Signing the . zone failed with '{}'.".format("\n".join(this_return_text.splitlines()[-2:])))
+	log("Signed the root zone with '{}'".format(root_signing_cmd))
 	# Sanity check the signed zone
-	try:
-		subprocess.check_call("{}/dnssec-verify -o . root.zone 2>/dev/null".format(binary_prefix), shell=True)
-	except Exception as this_e:
-		die("Sanity-checking the signed root zone died with '{}'.".format(this_e))
+	this_return_text = subprocess.getoutput("{}/dnssec-verify -o . root.zone 2>/dev/null".format(binary_prefix))
+	if "fatal" in this_return_text:
+		die("Sanity-checking the signed root zone died with '{}'.".format(this_return_text))
 	log_and_print("Wrote out signed and verified root.zone")
 
 	### Make the zone for the nameserver
@@ -335,23 +320,21 @@ if __name__ == "__main__":
 	nameserver_tld_f.write(nameserver_tld_contents)
 	nameserver_tld_f.close()
 	log_and_print("Wrote out {}".format(nameserver_tld_zone_unsigned))
-	try:
-		subprocess.check_call("named-checkzone {} {} >/dev/null".format(nameserver_name_suffix_tld, nameserver_tld_zone_unsigned), shell=True)
-	except Exception as this_e:
-		die("Sanity-checking the nameservers TLD zone died with '{}'.".format(this_e))
+	this_return_text = subprocess.getoutput("named-checkzone {} {} >/dev/null".format(nameserver_name_suffix_tld, nameserver_tld_zone_unsigned))
+	if "fatal" in this_return_text:
+		die("Sanity-checking the nameservers TLD zone died with '{}'.".format(this_return_text))
 	# Sign the TLD zone
-	#   This should probably be improved to exactly mimic how .net is signed ##FUTURE##
-	try:
-		subprocess.check_call("{0}/dnssec-signzone -S -o {1}. -k {2}.key -f {3} {4} >/dev/null 2>/dev/null"\
-			.format(binary_prefix, nameserver_name_suffix_tld, nameserver_tld_ksk_file_name, nameserver_tld_zone_signed, nameserver_tld_zone_unsigned), shell=True)
-	except Exception as this_e:
-		die("Signing the {} zone failed with '{}'.".format(nameserver_tld_zone_unsigned, this_e))
+	tld_signing_cmd = "{0}/dnssec-signzone -S -o {1}. -k {2}.key -f {3} {4} >/dev/null 2>/dev/null"\
+			.format(binary_prefix, nameserver_name_suffix_tld, nameserver_tld_ksk_file_name, nameserver_tld_zone_signed, nameserver_tld_zone_unsigned)
+	this_return_text = subprocess.getoutput(tld_signing_cmd)
+	if "fatal" in this_return_text:
+		die("Signing the {} zone failed with '{}'.".format(nameserver_tld_zone_unsigned, this_return_text))
+	log("Signed the {} zone with '{}'".format(nameserver_name_suffix_tld, tld_signing_cmd))
 	# Sanity check the signed zone
-	try:
-		subprocess.check_call("{}/dnssec-verify -o {}. {} 2>/dev/null"
-			.format(binary_prefix, nameserver_name_suffix_tld, nameserver_tld_zone_signed), shell=True)
-	except Exception as this_e:
-		die("Sanity-checking the signed nameserver zone died with '{}'.".format(this_e))
+	this_return_text = subprocess.getoutput("{}/dnssec-verify -o {}. {} 2>/dev/null"
+			.format(binary_prefix, nameserver_name_suffix_tld, nameserver_tld_zone_signed))
+	if "fatal" in this_return_text:
+		die("Sanity-checking the signed nameserver zone died with '{}'.".format(this_return_text))
 	log_and_print("Wrote out signed and verified nameserver zone")
 
 	### Make the zone for the nameserver full zone name
@@ -369,10 +352,9 @@ if __name__ == "__main__":
 	nameserver_f.write(nameserver_contents)
 	nameserver_f.close()
 	log_and_print("Wrote out {}".format(nameserver_zone_name))
-	try:
-		subprocess.check_call("named-checkzone {} {} >/dev/null".format(nameserver_suffix, nameserver_zone_name), shell=True)
-	except Exception as this_e:
-		die("Sanity-checking the server's authoritative zone died with '{}'.".format(this_e))
+	this_return_text = subprocess.getoutput("named-checkzone {} {} >/dev/null".format(nameserver_suffix, nameserver_zone_name))
+	if "fatal" in this_return_text:
+		die("Sanity-checking the server's authoritative zone died with '{}'.".format(this_return_text))
 
 	### Output a file that is the same as the authoritative zone, but formatted like a root hints file
 	# Start with the original zone file, remove the SOA, and make the NS records be for the root
@@ -412,10 +394,9 @@ zone "SERVER_ZONE_GOES_HERE." { type master; file "SERVER_ZONE_GOES_HERE.zone"; 
 	bind_conf_f.write(bind_config_contents)
 	bind_conf_f.close()
 	# Sanity check the resulting zone
-	try:
-		subprocess.check_call("named-checkconf named.conf", shell=True)
-	except Exception as this_e:
-		die("Sanity-checking named.conf died with '{}'.".format(this_e))
+	this_return_text = subprocess.getoutput("named-checkconf named.conf")
+	if "fatal" in this_return_text:
+		die("Sanity-checking named.conf died with '{}'.".format(this_return_text))
 	log("named.conf is\n{}".format(bind_config_contents))
 	log_and_print("Wrote out named.conf")
 

@@ -1,18 +1,8 @@
 # There is just one section [confs]
 [confs]
 
-# Directory to build the new root into
-#   This option is required
-#   If this does not start with a "/", it is relative to the program root
-#directory = /path/to/dir
-
-# Suffix for the root name servers
-#   Defaults to "some-servers.p53"
-#   The name server suffix must have exactly two labels (a.b)
-#suffix = something.notreal
-
 # The IPv4 and IPv6 addresses that the new root should respond to
-#   At least one of "ipv4" and/or "ipv6" must be given
+#   At least one of "ipv4" and/or "ipv6" **must** be given in this file
 #   If either "ipv4" or "ipv6" are not given, that protocol will not be supported
 #   Multiple values are separated with spaces
 #   Do *not* include either IPv4 or IPv6 loopback addresses here
@@ -37,12 +27,24 @@
 #   Defaults to 1
 #zsk-number = 1
 
+# Suffix for the root name servers
+#   Defaults to "some-servers.p53"
+#   The name server suffix must have exactly two labels (a.b)
+#suffix = something.notreal
+
 # Emit the wrong trust anchor
 #   This is probably only useful for testing key rollovers where
 #   someone is still using the old KSK as a trust anchor
 #   This is only allowed if ksk-number is greater than 1
 #   Defaults to false
 # wrong-trust-anchor = false
+
+### The following two settings relate to the local environment on the system running this program
+
+# Directory to build the new root into
+#   This option is required
+#   If this does not start with a "/", it is relative to the program root
+#directory = /path/to/dir
 
 # Prefix for the dnssec-* binaries from BIND
 #   Default is "/usr/sbin"
