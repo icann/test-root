@@ -55,7 +55,7 @@ if __name__ == "__main__":
 	log("Starting new run; in {}".format(start_dir))
 
 	# Get the command line arguments
-	if len(sys.argv) < 1:
+	if len(sys.argv) < 2:
 		die("You must specify a configuration file as the first argument on the command line.")
 	config_file = sys.argv[1]
 	if not os.path.exists(config_file):
@@ -91,19 +91,13 @@ if __name__ == "__main__":
 	if not os.path.exists("{}/named-checkconf".format(binary_prefix)):
 		die("Could not find named-checkconf in {}. See the README.".format(binary_prefix))
 
-	# Get the nameserver name and parts
-	nameserver_suffix = config.get("suffix", DEFAULT_NAMESERVER_NAME_SUFFIX)
-	nameserver_name_suffix_parts = nameserver_suffix.split(".")
-	if len(nameserver_name_suffix_parts) != 2:
-		die("The name server suffix must have exactly two labels; {} was given.".format(nameserver_suffix))
-	nameserver_name_suffix_tld = nameserver_name_suffix_parts[-1]
-	log("Nameserver suffix is {}".format(nameserver_suffix))
-
-	### Create a directory for holding the root zone
+	### Create a directory for holding the files associated with the root zone being created
 	target_dir = target_dir_in
-	# Make sure it is a full path
+	# If the path given for the target_dir does not start with a /, put it in the same directory as the config file
 	if not target_dir.startswith("/"):
-		target_dir = "{}/{}".format(start_dir, target_dir)
+		path_to_config_file = os.path.abspath(os.path.split(config_file)[0])
+		log("The path to the config file is {}".format(path_to_config_file))
+		target_dir = "{}/{}".format(path_to_config_file, target_dir)
 	if os.path.exists(target_dir):
 		moved_target_dir = "{}-{}".format(target_dir, time.strftime("%Y%m%d%H%M%S"))
 		try:
@@ -117,6 +111,14 @@ if __name__ == "__main__":
 		die("Could not create '{}' directory: {}.".format(target_dir, this_e))
 	log_and_print("Created directory {}".format(target_dir))
 	os.chdir(target_dir)
+
+	# Get the nameserver name and parts
+	nameserver_suffix = config.get("suffix", DEFAULT_NAMESERVER_NAME_SUFFIX)
+	nameserver_name_suffix_parts = nameserver_suffix.split(".")
+	if len(nameserver_name_suffix_parts) != 2:
+		die("The name server suffix must have exactly two labels; {} was given.".format(nameserver_suffix))
+	nameserver_name_suffix_tld = nameserver_name_suffix_parts[-1]
+	log("Nameserver suffix is {}".format(nameserver_suffix))
 
 	### Determine the v4 and v6 addresses to listen on
 	v4_addr_text = config.get("ipv4")
@@ -141,7 +143,7 @@ if __name__ == "__main__":
 		die("Getting the root zone didn't actually get a file.")
 	if os.path.getsize(ORIG_NAME) < 2000000:
 		die("Getting the root zone resulted in a file that seems too short.")
-	log_and_print("Got the original root zone")
+	log("Got the original root zone")
 
 	### Make the name server names; include the trailing periods
 	all_server_full_names = []
@@ -199,7 +201,7 @@ if __name__ == "__main__":
 	trust_anchor_dnskey_f = open(TRUST_ANCHOR_DNSKEY_FILE_NAME, mode="wt")
 	trust_anchor_dnskey_f.write("{}\n".format(ksk_for_trust_anchor))
 	trust_anchor_dnskey_f.close()
-	log_and_print("Wrote out {}".format(TRUST_ANCHOR_DNSKEY_FILE_NAME))
+	log("Wrote out {}".format(TRUST_ANCHOR_DNSKEY_FILE_NAME))
 	if use_wrong_trust_anchor:
 		log_and_print("   Note that this is purposely the *wrong* trust anchor.")
 
@@ -242,7 +244,7 @@ if __name__ == "__main__":
 		die("The first line of the root zone file didn't contain 'SOA'.")
 	soa_line_parts = (root_zone_lines[0]).split(" ")
 	in_soa = soa_line_parts[6]
-	log_and_print("Incoming root zone SOA is {}".format(in_soa))
+	log("Incoming root zone SOA is {}".format(in_soa))
 	new_soa_value = in_soa[:-2] + "99"
 	root_zone_lines[0] = ". 3600 IN SOA a.{0}. foo.{0}. {1} 120 72 9600 3600".format(nameserver_suffix, new_soa_value)
 	# Remove the original DNSKEY, RRSIG, and NSEC records
@@ -298,7 +300,7 @@ if __name__ == "__main__":
 	this_return_text = subprocess.getoutput("{}/dnssec-verify -o . root.zone 2>/dev/null".format(binary_prefix))
 	if "fatal" in this_return_text:
 		die("Sanity-checking the signed root zone died with '{}'.".format(this_return_text))
-	log_and_print("Wrote out signed and verified root.zone")
+	log("Wrote out signed and verified root.zone")
 
 	### Make the zone for the nameserver
 	nameserver_tld_content_lines = []
@@ -319,7 +321,7 @@ if __name__ == "__main__":
 	nameserver_tld_f = open(nameserver_tld_zone_unsigned, mode="wt")
 	nameserver_tld_f.write(nameserver_tld_contents)
 	nameserver_tld_f.close()
-	log_and_print("Wrote out {}".format(nameserver_tld_zone_unsigned))
+	log("Wrote out {}".format(nameserver_tld_zone_unsigned))
 	this_return_text = subprocess.getoutput("named-checkzone {} {} >/dev/null".format(nameserver_name_suffix_tld, nameserver_tld_zone_unsigned))
 	if "fatal" in this_return_text:
 		die("Sanity-checking the nameservers TLD zone died with '{}'.".format(this_return_text))
@@ -335,7 +337,7 @@ if __name__ == "__main__":
 			.format(binary_prefix, nameserver_name_suffix_tld, nameserver_tld_zone_signed))
 	if "fatal" in this_return_text:
 		die("Sanity-checking the signed nameserver zone died with '{}'.".format(this_return_text))
-	log_and_print("Wrote out signed and verified nameserver zone")
+	log("Wrote out signed and verified nameserver zone")
 
 	### Make the zone for the nameserver full zone name
 	#   Note that this zone is *not* signed; only the TLD zone is
@@ -351,7 +353,7 @@ if __name__ == "__main__":
 	nameserver_f = open(nameserver_zone_name, mode="wt")
 	nameserver_f.write(nameserver_contents)
 	nameserver_f.close()
-	log_and_print("Wrote out {}".format(nameserver_zone_name))
+	log("Wrote out {}".format(nameserver_zone_name))
 	this_return_text = subprocess.getoutput("named-checkzone {} {} >/dev/null".format(nameserver_suffix, nameserver_zone_name))
 	if "fatal" in this_return_text:
 		die("Sanity-checking the server's authoritative zone died with '{}'.".format(this_return_text))
@@ -366,12 +368,12 @@ if __name__ == "__main__":
 	hints_f = open(ROOT_HINTS_FILE_NAME, mode="wt")
 	hints_f.write(hints_contents)
 	hints_f.close()
-	log_and_print("Wrote out {}".format(ROOT_HINTS_FILE_NAME))
+	log("Wrote out {}".format(ROOT_HINTS_FILE_NAME))
 
 	### Create the named.conf
 	# Make the replacements
 	bind_config_contents = '''options {
-directory "THIS_DIR";
+directory "SOME_DIRECTORY_NAME_GOES_HERE";
 recursion no;
 empty-zones-enable no;
 listen-on {LISTEN_ON_IPV4_VALS;};
@@ -385,9 +387,8 @@ zone "SERVER_ZONE_GOES_HERE." { type master; file "SERVER_ZONE_GOES_HERE.zone"; 
 '''
 	v4_addrs.append("127.0.0.1")
 	v6_addrs.append("::1")
-	bind_config_contents = bind_config_contents.replace("THIS_DIR", target_dir)
-	bind_config_contents = bind_config_contents.replace("LISTEN_ON_IPV4_VALS", ";".join(v4_addrs))
-	bind_config_contents = bind_config_contents.replace("LISTEN_ON_IPV6_VALS", ";".join(v6_addrs))
+	bind_config_contents = bind_config_contents.replace("LISTEN_ON_IPV4_VALS", "; ".join(v4_addrs))
+	bind_config_contents = bind_config_contents.replace("LISTEN_ON_IPV6_VALS", "; ".join(v6_addrs))
 	bind_config_contents = bind_config_contents.replace("SERVER_ZONE_TLD_GOES_HERE", nameserver_name_suffix_tld)
 	bind_config_contents = bind_config_contents.replace("SERVER_ZONE_GOES_HERE", nameserver_suffix)
 	bind_conf_f = open("named.conf", mode="wt")
@@ -398,7 +399,7 @@ zone "SERVER_ZONE_GOES_HERE." { type master; file "SERVER_ZONE_GOES_HERE.zone"; 
 	if "fatal" in this_return_text:
 		die("Sanity-checking named.conf died with '{}'.".format(this_return_text))
 	log("named.conf is\n{}".format(bind_config_contents))
-	log_and_print("Wrote out named.conf")
+	log("Wrote out named.conf")
 
 	### Say how to up BIND
 	log_and_print("You can start up bind with:\n   sudo /path/to/named -c {}/named.conf".format(target_dir))
@@ -419,7 +420,7 @@ zone "SERVER_ZONE_GOES_HERE." { type master; file "SERVER_ZONE_GOES_HERE.zone"; 
 	bind_config_f = open(BIND_TRUSTED_KEYS_NAME, mode="wt")
 	bind_config_f.write(bind_config_contents)
 	bind_config_f.close()
-	log_and_print("Wrote out {}".format(BIND_TRUSTED_KEYS_NAME))
+	log("Wrote out {}".format(BIND_TRUSTED_KEYS_NAME))
 
 	### Write out the PowerDNS include file
 	# This contains the addDS statement in Lua for the trust anchor
@@ -432,7 +433,7 @@ zone "SERVER_ZONE_GOES_HERE." { type master; file "SERVER_ZONE_GOES_HERE.zone"; 
 	pdns_config_f = open(PDNS_TRUSTED_KEYS_NAME, mode="wt")
 	pdns_config_f.write(pdns_config_contents)
 	pdns_config_f.close()
-	log_and_print("Wrote out {}".format(PDNS_TRUSTED_KEYS_NAME))
+	log("Wrote out {}".format(PDNS_TRUSTED_KEYS_NAME))
 
 	### Write out the knot configuration file
 	# As of 2017-08-03, knot has a bug that prevents it from reading root.hints as a normal file
@@ -464,7 +465,7 @@ zone "SERVER_ZONE_GOES_HERE." { type master; file "SERVER_ZONE_GOES_HERE.zone"; 
 	knot_config_f = open(KNOT_CONFIG_FILE_NAME, mode="wt")
 	knot_config_f.write(knot_config_contents)
 	knot_config_f.close()
-	log_and_print("Wrote out {}".format(KNOT_CONFIG_FILE_NAME))
+	log("Wrote out {}".format(KNOT_CONFIG_FILE_NAME))
 
 	### Finish up
 	os.chdir(start_dir)
