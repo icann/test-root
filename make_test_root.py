@@ -373,7 +373,6 @@ if __name__ == "__main__":
 	### Create the named.conf
 	# Make the replacements
 	bind_config_contents = '''options {
-directory "SOME_DIRECTORY_NAME_GOES_HERE";
 recursion no;
 empty-zones-enable no;
 listen-on {LISTEN_ON_IPV4_VALS;};
