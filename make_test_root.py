@@ -86,11 +86,49 @@ if __name__ == "__main__":
 
 	# Get the prefix for the binaries
 	binary_prefix = config.get("bin-prefix", DEFAULT_BIN_PREFIX)
-
 	# Sanity check that bindutils are installed
 	if not os.path.exists("{}/named-checkconf".format(binary_prefix)):
 		die("Could not find named-checkconf in {}. See the README.".format(binary_prefix))
 
+	# Get the nameserver name and parts
+	nameserver_suffix = config.get("suffix", DEFAULT_NAMESERVER_NAME_SUFFIX)
+	nameserver_name_suffix_parts = nameserver_suffix.split(".")
+	if len(nameserver_name_suffix_parts) != 2:
+		die("The name server suffix must have exactly two labels; {} was given.".format(nameserver_suffix))
+	nameserver_name_suffix_tld = nameserver_name_suffix_parts[-1]
+	log("Nameserver suffix is {}".format(nameserver_suffix))
+
+	# Determine the v4 and v6 addresses to listen on
+	v4_addr_text = config.get("ipv4")
+	if v4_addr_text:
+		v4_addrs = v4_addr_text.split(" ")
+	else:
+		v4_addrs = []
+	v6_addr_text = config.get("ipv6")
+	if v6_addr_text:
+		v6_addrs = v6_addr_text.split(" ")
+	else:
+		v6_addrs = []
+	log_and_print("Found addresses '{}' and '{}'".format(" ".join(v4_addrs), " ".join(v6_addrs)))
+
+	# Create new KSK and ZSK keys
+	ksk_type = config.get("ksk-type", "rsa2048")
+	ksk_crypto_args = get_crypto(ksk_type)
+	number_of_ksks = config.get("ksk-number", "1")  # Comes in as a string
+	number_of_ksks = int(number_of_ksks)
+	zsk_type = config.get("zsk-type", "rsa2048")
+	zsk_crypto_args = get_crypto(zsk_type)
+	number_of_zsks = config.get("zsk-number", "1")  # Comes in as a string
+	number_of_zsks = int(number_of_zsks)
+
+	# If wrong-trust-anchor is set, ksk-number must be greater than 1
+	use_wrong_trust_anchor = config.get("wrong-trust-anchor")
+	if use_wrong_trust_anchor and (number_of_ksks <= 1):
+		die("Setting wrong-trust-anchor requires ksk-number to be greater than 1.")
+	
+	# Get the TTL for various SOAs and the RRSIGs
+	soa_ttl = config.get("ttl-for-soa", 86400)
+	
 	### Create a directory for holding the files associated with the root zone being created
 	target_dir = target_dir_in
 	# If the path given for the target_dir does not start with a /, put it in the same directory as the config file
@@ -112,27 +150,6 @@ if __name__ == "__main__":
 	log_and_print("Created directory {}".format(target_dir))
 	os.chdir(target_dir)
 
-	# Get the nameserver name and parts
-	nameserver_suffix = config.get("suffix", DEFAULT_NAMESERVER_NAME_SUFFIX)
-	nameserver_name_suffix_parts = nameserver_suffix.split(".")
-	if len(nameserver_name_suffix_parts) != 2:
-		die("The name server suffix must have exactly two labels; {} was given.".format(nameserver_suffix))
-	nameserver_name_suffix_tld = nameserver_name_suffix_parts[-1]
-	log("Nameserver suffix is {}".format(nameserver_suffix))
-
-	### Determine the v4 and v6 addresses to listen on
-	v4_addr_text = config.get("ipv4")
-	if v4_addr_text:
-		v4_addrs = v4_addr_text.split(" ")
-	else:
-		v4_addrs = []
-	v6_addr_text = config.get("ipv6")
-	if v6_addr_text:
-		v6_addrs = v6_addr_text.split(" ")
-	else:
-		v6_addrs = []
-	log_and_print("Found addresses '{}' and '{}'".format(" ".join(v4_addrs), " ".join(v6_addrs)))
-
 	### Get the current root zone master file
 	try:
 		subprocess.check_call("wget -q -O {} http://www.internic.net/domain/root.zone".format(ORIG_NAME), shell=True)
@@ -150,38 +167,26 @@ if __name__ == "__main__":
 	for this_letter in "abcdefghijklm":
 		all_server_full_names.append("{}.{}.".format(this_letter, nameserver_suffix))
 
-	### Create new KSK and ZSK keys
-	ksk_type = config.get("ksk-type", "rsa2048")
-	ksk_crypto_args = get_crypto(ksk_type)
-	number_of_ksks = config.get("ksk-number", "1")  # Comes in as a string
-	number_of_ksks = int(number_of_ksks)
-	zsk_type = config.get("zsk-type", "rsa2048")
-	zsk_crypto_args = get_crypto(zsk_type)
-	number_of_zsks = config.get("zsk-number", "1")  # Comes in as a string
-	number_of_zsks = int(number_of_zsks)
 	# Save the file names as the key files are produced
 	ksk_file_names = []  # Just the KSKs
 	zsk_file_names = []  # Just the ZSKs
 	# Make the KSK and ZSK files
 	for _ in range(number_of_ksks):
-		this_output = subprocess.getoutput("{}/dnssec-keygen -f KSK {} -n ZONE -L 172800 -r /dev/urandom .".format(binary_prefix, ksk_crypto_args))
+		this_output = subprocess.getoutput("{0}/dnssec-keygen -f KSK {1} -n ZONE -L {2} -r /dev/urandom ."\
+			.format(binary_prefix, ksk_crypto_args, soa_ttl))
 		first_line_of_output = (this_output.splitlines())[-1]
 		if "fatal" in first_line_of_output:
 			die("Failed to make the KSK keys: {}".format(first_line_of_output))
 		ksk_file_names.append(first_line_of_output)
 	for _ in range(number_of_zsks):
-		this_output = subprocess.getoutput("{}/dnssec-keygen  {} -n ZONE -L 172800 -r /dev/urandom .".format(binary_prefix, zsk_crypto_args))
+		this_output = subprocess.getoutput("{0}/dnssec-keygen {1} -n ZONE -L {2} -r /dev/urandom ."\
+			.format(binary_prefix, zsk_crypto_args, soa_ttl))
 		first_line_of_output = (this_output.splitlines())[-1]
 		if "fatal" in first_line_of_output:
 			die("Failed to make the ZSK keys: {}".format(first_line_of_output))
 		zsk_file_names.append(first_line_of_output)
 	log_and_print("The {} KSKs are {}".format(len(ksk_file_names), " ".join(ksk_file_names)))
 	log_and_print("The {} ZSKs are {}".format(len(zsk_file_names), " ".join(zsk_file_names)))
-	# If wrong-trust-anchor is set, ksk-number must be greater than 1
-	use_wrong_trust_anchor = config.get("wrong-trust-anchor")
-	if use_wrong_trust_anchor and (number_of_ksks <= 1):
-		die("Setting wrong-trust-anchor requires ksk-number to be greater than 1.")
-	
 	# Pick which KSK to use as the trust anchor
 	#   If use_wrong_trust_anchor, use the second one instead of the first
 	if use_wrong_trust_anchor:
@@ -210,8 +215,8 @@ if __name__ == "__main__":
 	#   We need to do this part now so that we can add the DS record of the KSK to the root zone if we are signing the new TLD
 	log("Making KSK for {}".format(nameserver_name_suffix_tld))
 	# As a shortcut, use the same signing type as the KSK
-	this_return_text = subprocess.getoutput("{}/dnssec-keygen {} -f KSK -n ZONE -L 3600 -r /dev/urandom {}."\
-		.format(binary_prefix, ksk_crypto_args, nameserver_name_suffix_tld))
+	this_return_text = subprocess.getoutput("{0}/dnssec-keygen {1} -f KSK -n ZONE -L {2} -r /dev/urandom {3}."\
+		.format(binary_prefix, ksk_crypto_args, soa_ttl, nameserver_name_suffix_tld))
 	if "fatal" in this_return_text:
 		die("Was not able to create nameserver KSK: '{}'.".format(this_return_text))
 	nameserver_tld_ksk_file_name = (this_return_text.splitlines())[-1]
@@ -228,7 +233,8 @@ if __name__ == "__main__":
 	namenameserver_tld_ds_record = open(nameserver_ds_file, mode="rt").read()
 	log("Making ZSK for {}".format(nameserver_name_suffix_tld))
 	# As a shortcut, use the same signing type as the KSK
-	this_return_text = subprocess.getoutput("{}/dnssec-keygen {} -n ZONE -L 3600 -r /dev/urandom {}.".format(binary_prefix, ksk_crypto_args, nameserver_name_suffix_tld))
+	this_return_text = subprocess.getoutput("{0}/dnssec-keygen {1} -n ZONE -L {2} -r /dev/urandom {3}."\
+		.format(binary_prefix, ksk_crypto_args, soa_ttl, nameserver_name_suffix_tld))
 	if "fatal" in this_return_text:
 		die("Was not able to create nameserver ZSK: '{}'.".format(this_return_text))
 	nameserver_tld_zsk_file_name = (this_return_text.splitlines())[-1]
@@ -239,6 +245,7 @@ if __name__ == "__main__":
 	# Collapse all tabs and multiple spaces into single spaces
 	zone_content = re.sub(r'[\t ]+', ' ', zone_content)
 	root_zone_lines = zone_content.splitlines()
+	# Current root zone SOA is 2019020600 1800 900 604800 86400
 	# Change the SOA to end in "99"
 	if "SOA" not in root_zone_lines[0]:
 		die("The first line of the root zone file didn't contain 'SOA'.")
@@ -246,7 +253,7 @@ if __name__ == "__main__":
 	in_soa = soa_line_parts[6]
 	log("Incoming root zone SOA is {}".format(in_soa))
 	new_soa_value = in_soa[:-2] + "99"
-	root_zone_lines[0] = ". 3600 IN SOA a.{0}. foo.{0}. {1} 120 72 9600 3600".format(nameserver_suffix, new_soa_value)
+	root_zone_lines[0] = ". {0} IN SOA a.{1}. foo.{1}. {2} 1800 900 604800 {0}".format(soa_ttl, nameserver_suffix, new_soa_value)
 	# Remove the original DNSKEY, RRSIG, and NSEC records
 	root_zone_lines = [x for x in root_zone_lines if (x.split(" "))[3] != "DNSKEY"]
 	root_zone_lines = [x for x in root_zone_lines if (x.split(" "))[3] != "RRSIG"]
@@ -258,10 +265,10 @@ if __name__ == "__main__":
 	# Remove the original NS records for the root
 	root_zone_lines = [x for x in root_zone_lines if not x.startswith(". 518400 IN NS")]
 	# Add in the new root NS records
-	root_zone_lines.extend([". 3600 IN NS {}".format(x) for x in all_server_full_names])
+	root_zone_lines.extend([". {0} IN NS {1}".format(soa_ttl, x) for x in all_server_full_names])
 	# Be authoritative for the name server: add NS records for the nameserver TLD and full name
-	root_zone_lines.extend(["{}. 3600 IN NS {}".format(nameserver_name_suffix_tld, x) for x in all_server_full_names])
-	root_zone_lines.extend(["{}. 3600 IN NS {}".format(nameserver_suffix, x) for x in all_server_full_names])
+	root_zone_lines.extend(["{0}. {1} IN NS {2}".format(nameserver_name_suffix_tld, soa_ttl, x) for x in all_server_full_names])
+	root_zone_lines.extend(["{0}. {1} IN NS {2}".format(nameserver_suffix, soa_ttl, x) for x in all_server_full_names])
 	# Add the DS record for nameserver TLD
 	root_zone_lines.append(namenameserver_tld_ds_record.strip())
 	# Create address records for the name servers
@@ -272,12 +279,14 @@ if __name__ == "__main__":
 		while len(v4_addrs) < 13:
 			v4_addrs.extend(v4_addrs)
 		v4_addrs = v4_addrs[:13]
-		nameserver_address_records.extend(["{} 3600 IN A {}".format(all_server_full_names[x], v4_addrs[x]) for x in range(len(all_server_full_names))])
+		nameserver_address_records.extend(["{0} {1} IN A {2}"\
+			.format(all_server_full_names[x], soa_ttl, v4_addrs[x]) for x in range(len(all_server_full_names))])
 	if v6_addrs:
 		while len(v6_addrs) < 13:
 			v6_addrs.extend(v6_addrs)
 		v6_addrs = v6_addrs[:13]
-		nameserver_address_records.extend(["{} 3600 IN AAAA {}".format(all_server_full_names[x], v6_addrs[x]) for x in range(len(all_server_full_names))])
+		nameserver_address_records.extend(["{0} {1} IN AAAA {2}"\
+			.format(all_server_full_names[x], soa_ttl, v6_addrs[x]) for x in range(len(all_server_full_names))])
 	root_zone_lines.extend(nameserver_address_records)
 	# Put it all together
 	root_zone_content = "\n".join(root_zone_lines) + "\n"
@@ -305,14 +314,15 @@ if __name__ == "__main__":
 	### Make the zone for the nameserver
 	nameserver_tld_content_lines = []
 	# Give it the same SOA as from the root zone
-	nameserver_tld_content_lines.append("{0}. 3600 IN SOA a.{0}. foo.{0}. {1} 120 72 9600 3600".format(nameserver_name_suffix_tld, new_soa_value))
+	nameserver_tld_content_lines.append("{0}. {1} IN SOA a.{0}. foo.{0}. {2} 1800 900 604800 {1}"\
+		.format(nameserver_name_suffix_tld, soa_ttl, new_soa_value))
 	# Add the NS records
-	nameserver_tld_content_lines.extend(["{0}. 3600 IN NS {1}".format(nameserver_name_suffix_tld, x) for x in all_server_full_names])
+	nameserver_tld_content_lines.extend(["{0}. {1} IN NS {2}".format(nameserver_name_suffix_tld, soa_ttl, x) for x in all_server_full_names])
 	# Add the DNSKEY records
 	nameserver_tld_content_lines.append(open("{}.key".format(nameserver_tld_ksk_file_name), mode="rt").read())
 	nameserver_tld_content_lines.append(open("{}.key".format(nameserver_tld_zsk_file_name), mode="rt").read())
 	# Add delegation
-	nameserver_tld_content_lines.extend(["{0}. 3600 IN NS {1}".format(nameserver_suffix, x) for x in all_server_full_names])
+	nameserver_tld_content_lines.extend(["{0}. {1} IN NS {2}".format(nameserver_suffix, soa_ttl, x) for x in all_server_full_names])
 	# Add the address records
 	nameserver_tld_content_lines.extend(nameserver_address_records)
 	nameserver_tld_contents = "\n".join(nameserver_tld_content_lines) + "\n"
@@ -343,9 +353,9 @@ if __name__ == "__main__":
 	#   Note that this zone is *not* signed; only the TLD zone is
 	nameserver_content_lines = []
 	# Give it the same SOA as from the root zone
-	nameserver_content_lines.append("{0}. 3600 IN SOA a.{0}. foo.{0}. {1} 120 72 9600 3600".format(nameserver_suffix, new_soa_value))
+	nameserver_content_lines.append("{0}. {1} IN SOA a.{0}. foo.{0}. {2} 1800 900 604800 {1}".format(nameserver_suffix, soa_ttl, new_soa_value))
 	# Add the NS records
-	nameserver_content_lines.extend(["{0}. 3600 IN NS {1}".format(nameserver_suffix, x) for x in all_server_full_names])
+	nameserver_content_lines.extend(["{0}. {1} IN NS {2}".format(nameserver_suffix, soa_ttl, x) for x in all_server_full_names])
 	# Add the address records
 	nameserver_content_lines.extend(nameserver_address_records)
 	nameserver_contents = "\n".join(nameserver_content_lines) + "\n"
@@ -361,7 +371,7 @@ if __name__ == "__main__":
 	### Output a file that is the same as the authoritative zone, but formatted like a root hints file
 	# Start with the original zone file, remove the SOA, and make the NS records be for the root
 	hints_lines = []
-	hints_lines.extend([". 3600 IN NS {}".format(x) for x in all_server_full_names])
+	hints_lines.extend([". {} IN NS {}".format(soa_ttl, x) for x in all_server_full_names])
 	hints_lines.extend(nameserver_address_records)
 	hints_contents = "\n".join(hints_lines) + "\n"
 	# Add the address records
@@ -401,7 +411,7 @@ zone "SERVER_ZONE_GOES_HERE." { type master; file "SERVER_ZONE_GOES_HERE.zone"; 
 	log("Wrote out named.conf")
 
 	### Say how to up BIND
-	log_and_print("You can start up bind with:\n   sudo /path/to/named -c {}/named.conf".format(target_dir))
+	log_and_print("You can start up bind with:\n   cd {} && sudo /path/to/named -c named.conf".format(target_dir))
 	log_and_print("The hints file for this setup is at\n   {}/{}".format(target_dir, ROOT_HINTS_FILE_NAME))
 	log_and_print("The trust anchor file for this setup is at\n   {}/{}".format(target_dir, TRUST_ANCHOR_DS_FILE_NAME))
 
@@ -448,7 +458,7 @@ zone "SERVER_ZONE_GOES_HERE." { type master; file "SERVER_ZONE_GOES_HERE.zone"; 
 	knot_config_lines.append("hints.root({")
 	knot_config_addresses = {}
 	for this_address_line in nameserver_address_records:
-		# Format of these lines in: a.test-net. 3600 IN A 192.241.196.36
+		# Format of these lines in: a.test-net. 600 IN A 192.241.196.36
 		(rname, _, _, _, rdata) = this_address_line.split(" ")
 		if knot_config_addresses.get(rname):
 			(knot_config_addresses[rname]).append("'{}'".format(rdata))
