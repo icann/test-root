@@ -172,15 +172,17 @@ if __name__ == "__main__":
 	zsk_file_names = []  # Just the ZSKs
 	# Make the KSK and ZSK files
 	for _ in range(number_of_ksks):
-		this_output = subprocess.getoutput("{0}/dnssec-keygen -f KSK {1} -n ZONE -L {2} -r /dev/urandom ."\
-			.format(binary_prefix, ksk_crypto_args, soa_ttl))
+		ksk_keygen_command = "{0}/dnssec-keygen -f KSK {1} -n ZONE -L {2} .".format(binary_prefix, ksk_crypto_args, soa_ttl)
+		this_output = subprocess.getoutput(ksk_keygen_command)
+		log("Output of '{}':\n{}".format(ksk_keygen_command, this_output))
 		first_line_of_output = (this_output.splitlines())[-1]
 		if "fatal" in first_line_of_output:
 			die("Failed to make the KSK keys: {}".format(first_line_of_output))
 		ksk_file_names.append(first_line_of_output)
 	for _ in range(number_of_zsks):
-		this_output = subprocess.getoutput("{0}/dnssec-keygen {1} -n ZONE -L {2} -r /dev/urandom ."\
-			.format(binary_prefix, zsk_crypto_args, soa_ttl))
+		zsk_keygen_command = "{0}/dnssec-keygen {1} -n ZONE -L {2} .".format(binary_prefix, zsk_crypto_args, soa_ttl)
+		this_output = subprocess.getoutput(zsk_keygen_command)
+		log("Output of '{}':\n{}".format(zsk_keygen_command, this_output))
 		first_line_of_output = (this_output.splitlines())[-1]
 		if "fatal" in first_line_of_output:
 			die("Failed to make the ZSK keys: {}".format(first_line_of_output))
@@ -215,7 +217,7 @@ if __name__ == "__main__":
 	#   We need to do this part now so that we can add the DS record of the KSK to the root zone if we are signing the new TLD
 	log("Making KSK for {}".format(nameserver_name_suffix_tld))
 	# As a shortcut, use the same signing type as the KSK
-	this_return_text = subprocess.getoutput("{0}/dnssec-keygen {1} -f KSK -n ZONE -L {2} -r /dev/urandom {3}."\
+	this_return_text = subprocess.getoutput("{0}/dnssec-keygen {1} -f KSK -n ZONE -L {2} {3}."\
 		.format(binary_prefix, ksk_crypto_args, soa_ttl, nameserver_name_suffix_tld))
 	if "fatal" in this_return_text:
 		die("Was not able to create nameserver KSK: '{}'.".format(this_return_text))
@@ -233,7 +235,7 @@ if __name__ == "__main__":
 	namenameserver_tld_ds_record = open(nameserver_ds_file, mode="rt").read()
 	log("Making ZSK for {}".format(nameserver_name_suffix_tld))
 	# As a shortcut, use the same signing type as the KSK
-	this_return_text = subprocess.getoutput("{0}/dnssec-keygen {1} -n ZONE -L {2} -r /dev/urandom {3}."\
+	this_return_text = subprocess.getoutput("{0}/dnssec-keygen {1} -n ZONE -L {2} {3}."\
 		.format(binary_prefix, ksk_crypto_args, soa_ttl, nameserver_name_suffix_tld))
 	if "fatal" in this_return_text:
 		die("Was not able to create nameserver ZSK: '{}'.".format(this_return_text))
@@ -245,7 +247,6 @@ if __name__ == "__main__":
 	# Collapse all tabs and multiple spaces into single spaces
 	zone_content = re.sub(r'[\t ]+', ' ', zone_content)
 	root_zone_lines = zone_content.splitlines()
-	# Current root zone SOA is 2019020600 1800 900 604800 86400
 	# Change the SOA to end in "99"
 	if "SOA" not in root_zone_lines[0]:
 		die("The first line of the root zone file didn't contain 'SOA'.")
