@@ -43,7 +43,7 @@
 #   Default is 86400
 #ttl-for-soa = 3600
 
-build_config_file# The following two settings relate to the local environment on the system running this program
+# The following two settings relate to the local environment on the system running this program
 
 # Directory to build the new root into
 #   This option is required
