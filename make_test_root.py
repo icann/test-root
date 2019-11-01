@@ -11,7 +11,6 @@ TRUST_ANCHOR_DNSKEY_FILE_NAME = "trust-anchor-dnskey"
 ROOT_HINTS_FILE_NAME = "root.hints"
 BIND_TRUSTED_KEYS_NAME = "bind-trusted-keys"
 PDNS_TRUSTED_KEYS_NAME = "pdns-lua"
-KNOT_CONFIG_FILE_NAME = "knot-config"
 DEFAULT_NAMESERVER_NAME_SUFFIX = "some-servers.p53"
 DEFAULT_BIN_PREFIX = "/usr/sbin"
 
@@ -444,38 +443,6 @@ zone "SERVER_ZONE_GOES_HERE." { type master; file "SERVER_ZONE_GOES_HERE.zone"; 
 	pdns_config_f.write(pdns_config_contents)
 	pdns_config_f.close()
 	log("Wrote out {}".format(PDNS_TRUSTED_KEYS_NAME))
-
-	### Write out the knot configuration file
-	# As of 2017-08-03, knot has a bug that prevents it from reading root.hints as a normal file
-	#   Further, there is a problem with finding the location of Lua files that are included with the "require" directive
-	#   Because of this, this program writes out a complete configuration file that can be used directly or as a template
-	#   The "/vagrant/Tests" prefix is used because this is what is used in the resolver testbed also created by ICANN
-	dir_for_config = os.path.basename(target_dir_in)
-	knot_config_lines = []
-	knot_config_lines.append("### Use this file as a template for a real configuration file")
-	knot_config_lines.append("net = { '127.0.0.1', '::1' }")
-	knot_config_lines.append("trust_anchors.file = '/vagrant/Tests/{}/trust-anchor-dnskey'".format(dir_for_config))
-	knot_config_lines.append("modules.load('hints')")
-	knot_config_lines.append("hints.root({")
-	knot_config_addresses = {}
-	for this_address_line in nameserver_address_records:
-		# Format of these lines in: a.test-net. 600 IN A 192.241.196.36
-		(rname, _, _, _, rdata) = this_address_line.split(" ")
-		if knot_config_addresses.get(rname):
-			(knot_config_addresses[rname]).append("'{}'".format(rdata))
-		else:
-			knot_config_addresses[rname] = ["'{}'".format(rdata)]
-	knot_config_interim_lines = []
-	# Format needs to be a list like: ['l.root-servers.net.'] = { '199.7.83.42', '1.2.3.4' }
-	for this_rname in sorted(knot_config_addresses):
-		knot_config_interim_lines.append("['{0}'] = {{ {1} }}".format(this_rname, ", ".join(knot_config_addresses[this_rname])))
-	knot_config_lines.append(",\n".join(knot_config_interim_lines))
-	knot_config_lines.append("})")
-	knot_config_contents = "\n".join(knot_config_lines) + "\n"
-	knot_config_f = open(KNOT_CONFIG_FILE_NAME, mode="wt")
-	knot_config_f.write(knot_config_contents)
-	knot_config_f.close()
-	log("Wrote out {}".format(KNOT_CONFIG_FILE_NAME))
 
 	### Finish up
 	os.chdir(start_dir)
