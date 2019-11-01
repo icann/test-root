@@ -38,14 +38,9 @@ The `wrong-trust-anchor` option, a boolean, is probably the only one that needs
 additonal description. If set to `true`, when the command emits a trust anchor
 for a root with two KSKs, the trust anchor will _not_ be the correct trust
 anchor: it will be for the KSK that did not sign the ZSKs. This is probably
-only useful for testing a KSK rollover such as that on October 11, 2017.
+only useful for testing a KSK rollover such as that took place on October 11, 2018.
 
 ## License
 
 See the `LICENSE` file.
 
-## Future features
-
-* Add algorithims other than RSA.
-
-* The zone that is used for the root server naming should be signed like .net is signed.

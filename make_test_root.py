@@ -14,6 +14,8 @@ PDNS_TRUSTED_KEYS_NAME = "pdns-lua"
 DEFAULT_NAMESERVER_NAME_SUFFIX = "some-servers.p53"
 DEFAULT_BIN_PREFIX = "/usr/sbin"
 
+# The types of signatures that are allowed
+#   This is a mapping for BIND's signing function. Others can be added easily.
 ALLOWED_SIGNATURE_TYPES = {
 	"rsa2048": "-a RSASHA256 -b 2048",
 	"rsa4096": "-a RSASHA256 -b 4096",
